@@ -249,11 +249,11 @@
                 if (tile instanceof TimedTile && tile.isBeingHeld && !tile.holdCompleted) {
 
                     tile.hit = true;
-                    endGame("Você segurou o tile longo demais (saiu da tela sem completar)!");
+                    endGame("Game Over!");
                 } else if (!(tile instanceof TimedTile && tile.holdCompleted)) {
 
                     tile.hit = true;
-                    endGame("Você deixou um tile passar!");
+                    endGame("Game Over!");
                 }
             }
         });
@@ -312,7 +312,7 @@
             }
         } else {
             if (!activeLongTileHolds[pressedKey]) {
-                endGame("Você apertou uma tecla inválida!");
+                endGame("Game Over!");
             }
         }
     });
