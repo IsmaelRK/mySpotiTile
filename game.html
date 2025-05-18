@@ -330,7 +330,7 @@
 
             if (!result.success && !longTileBeingHeld.holdCompleted) {
 
-                endGame(`Erro com tile longo: ${result.error || "Falha ao soltar."}`);
+                endGame(`${result.error || "Falha ao soltar."}`);
             }
             activeLongTileHolds[releasedKey] = null;
         }
