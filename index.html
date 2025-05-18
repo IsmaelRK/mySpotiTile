@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpotiTiles - Search Musics</title>
+    <link rel="stylesheet" href="static/index.css">
+    <link rel="icon" href="static/Primary_Logo_Green_CMYK.svg" type="image/x-icon">
+
+
+</head>
+<body>
+
+  <div class="user-auth-section" id="userAuthSection">
+    <!-- Auth content will be dynamically inserted here -->
+  </div>
+
+  <div class="container">
+
+    <img height="100px" src="static/Full_Logo_Green_RGB.svg" alt="spotify logo">
+
+    <form id="searchForm" class="search-box">
+      <input type="text" name="q" id="searchInput" placeholder="Type the music name..." required value="">
+      <button type="submit">Search</button>
+    </form>
+
+    <div id="resultsArea">
+      <!-- Search results will be dynamically inserted here -->
+    </div>
+  </div>
+
+  <script type="module">
+    const CLIENT_ID = '2c796fe1b750486f8505c350fdcfb05f';
+    const REDIRECT_URI = 'http://127.0.0.1:5000';
+    const SCOPE = "user-read-private user-read-email streaming user-modify-playback-state";
+
+    const TOKEN_ENDPOINT = "https://accounts.spotify.com/api/token";
+    const AUTH_URL = "https://accounts.spotify.com/authorize";
+    const API_BASE_URL = "https://api.spotify.com/v1/";
+
+    const userAuthSection = document.getElementById('userAuthSection');
+    const searchForm = document.getElementById('searchForm');
+    const searchInput = document.getElementById('searchInput');
+    const resultsArea = document.getElementById('resultsArea');
+
+    const generateRandomString = (length) => {
+      const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      const values = crypto.getRandomValues(new Uint8Array(length));
+      return values.reduce((acc, x) => acc + possible[x % possible.length], "");
+    };
+
+    const sha256 = async (plain) => {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(plain);
+      return window.crypto.subtle.digest('SHA-256', data);
+    };
+
+    const base64encode = (input) => {
+      return btoa(String.fromCharCode(...new Uint8Array(input)))
+        .replace(/=/g, '')
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_');
+    };
+
+    // --- AUTHENTICATION LOGIC ---
+    async function redirectToSpotifyAuthorize() {
+      const codeVerifier = generateRandomString(64);
+      localStorage.setItem('code_verifier', codeVerifier);
+
+      const hashed = await sha256(codeVerifier);
+      const codeChallenge = base64encode(hashed);
+
+      const params = {
+        response_type: 'code',
+        client_id: CLIENT_ID,
+        scope: SCOPE,
+        code_challenge_method: 'S256',
+        code_challenge: codeChallenge,
+        redirect_uri: REDIRECT_URI,
+      };
+
+      const authUrl = new URL(AUTH_URL);
+      authUrl.search = new URLSearchParams(params).toString();
+      window.location.href = authUrl.toString();
+    }
+
+    async function getToken(code) {
+      const codeVerifier = localStorage.getItem('code_verifier');
+      if (!codeVerifier) {
+        console.error("Code verifier not found. Restarting auth flow.");
+        redirectToSpotifyAuthorize();
+        return null;
+      }
+
+      const payload = {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          client_id: CLIENT_ID,
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: REDIRECT_URI,
+          code_verifier: codeVerifier,
+        }),
+      };
+
+      try {
+        const body = await fetch(TOKEN_ENDPOINT, payload);
+        const response = await body.json();
+        if (response.access_token) {
+          localStorage.setItem('access_token', response.access_token);
+          localStorage.setItem('refresh_token', response.refresh_token || ''); // Store refresh token if available
+          localStorage.removeItem('code_verifier'); // Clean up
+          return response.access_token;
+        } else {
+          console.error("Error fetching token:", response);
+          localStorage.removeItem('code_verifier');
+          return null;
+        }
+      } catch (error) {
+        console.error("Network error or other issue fetching token:", error);
+        localStorage.removeItem('code_verifier');
+        return null;
+      }
+    }
+
+    // --- API CALLS ---
+    async function fetchWebApi(endpoint, method = 'GET', body, token) {
+        const headers = {
+            'Authorization': `Bearer ${token}`,
+        };
+        if (method !== 'GET') {
+            headers['Content-Type'] = 'application/json';
+        }
+
+        try {
+            const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+                method,
+                headers,
+                body: body ? JSON.stringify(body) : undefined,
+            });
+            if (res.status === 204) return null; // Handle No Content
+            if (!res.ok) {
+                console.error(`API Error ${res.status}: ${await res.text()}`);
+                if (res.status === 401) { // Token expired or invalid
+                    handleLogout(); // Force re-login
+                }
+                return null;
+            }
+            return await res.json();
+        } catch (error) {
+            console.error("Error fetching from Web API:", error);
+            return null;
+        }
+    }
+
+    async function getUserProfile(token) {
+      return await fetchWebApi('me', 'GET', null, token);
+    }
+
+    async function searchTracks(query, token) {
+      return await fetchWebApi(`search?q=${encodeURIComponent(query)}&type=track&limit=6`, 'GET', null, token);
+    }
+
+
+    // --- UI UPDATES ---
+    function updateAuthUI(userInfo) {
+      userAuthSection.innerHTML = '';
+
+      if (userInfo) {
+        const greeting = document.createElement('span');
+        greeting.className = 'user-greeting';
+
+        let avatarHtml = '';
+        if (userInfo.images && userInfo.images.length > 0) {
+            avatarHtml = `<img src="${userInfo.images[0].url}" alt="Avatar de ${userInfo.display_name || userInfo.id}" class="user-avatar">`;
+        }
+
+        greeting.innerHTML = `${avatarHtml} Hello there, ${userInfo.display_name || userInfo.id}!`;
+        userAuthSection.appendChild(greeting);
+
+        const logoutButton = document.createElement('button');
+        logoutButton.className = 'auth-button';
+        logoutButton.textContent = 'Logout';
+        logoutButton.addEventListener('click', handleLogout);
+        userAuthSection.appendChild(logoutButton);
+      } else {
+        const loginButton = document.createElement('button');
+        loginButton.className = 'auth-button';
+        loginButton.textContent = 'Login com Spotify';
+        loginButton.addEventListener('click', redirectToSpotifyAuthorize);
+        userAuthSection.appendChild(loginButton);
+      }
+    }
+
+    function displayTracks(tracksData, query) {
+        resultsArea.innerHTML = '';
+
+        if (!tracksData || !tracksData.tracks || !tracksData.tracks.items || tracksData.tracks.items.length === 0) {
+            if (query) {
+                resultsArea.innerHTML = `<p class="no-results">No musics found for "${escapeHTML(query)}".</p>`;
+            }
+            return;
+        }
+
+        const header = document.createElement('h2');
+        header.className = 'results-header';
+        header.textContent = 'Search results:';
+        resultsArea.appendChild(header);
+
+        const grid = document.createElement('div');
+        grid.className = 'tracks-grid';
+
+        tracksData.tracks.items.forEach(item => {
+            const card = document.createElement('div');
+            card.className = 'track-card';
+
+            const albumArtUrl = item.album.images.length ? item.album.images[0].url : './placeholder-album.png';
+
+            card.innerHTML = `
+                <img src="${escapeHTML(albumArtUrl)}" alt="Capa de ${escapeHTML(item.album.name)}" class="album-art">
+                <div class="track-info">
+                    <h3>${escapeHTML(item.name)}</h3>
+                    <p>${escapeHTML(item.artists[0].name)} • ${escapeHTML(item.album.name)}</p>
+                </div>
+                <button class="select-button" data-uri="${escapeHTML(item.uri)}">Play</button>
+            `;
+
+            // Add event listener to the play button
+            card.querySelector('.select-button').addEventListener('click', function() {
+                handleSelectTrack(this.dataset.uri);
+            });
+            grid.appendChild(card);
+        });
+        resultsArea.appendChild(grid);
+    }
+
+    function escapeHTML(str) {
+        const p = document.createElement('p');
+        p.textContent = str;
+        return p.innerHTML;
+    }
+
+
+    // --- EVENT HANDLERS ---
+    function handleLogout() {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      localStorage.removeItem('user_info');
+      updateAuthUI(null);
+      resultsArea.innerHTML = '';
+      searchInput.value = '';
+
+      // window.location.href = REDIRECT_URI; // To clear URL params if any
+    }
+
+    async function handleSearch(event) {
+      event.preventDefault();
+      const query = searchInput.value.trim();
+      if (!query) return;
+
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        alert("Please login first.");
+        redirectToSpotifyAuthorize();
+        return;
+      }
+      const results = await searchTracks(query, token);
+      displayTracks(results, query);
+    }
+
+    function handleSelectTrack(trackUri) {
+        const accessToken = localStorage.getItem('access_token');
+        if (!trackUri || !accessToken) {
+            alert("Error selecting track or not logged in.");
+            return;
+        }
+        localStorage.setItem('selected_track_uri', trackUri);
+        window.location.href = 'game.html';
+    }
+
+
+    // --- INITIALIZATION ---
+    async function main() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get('code');
+      let accessToken = localStorage.getItem('access_token');
+
+      if (code) {
+        accessToken = await getToken(code);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      if (accessToken) {
+        const userInfo = await getUserProfile(accessToken);
+        if (userInfo) {
+            localStorage.setItem('user_info', JSON.stringify(userInfo)); // Optional: cache user info
+            updateAuthUI(userInfo);
+            const previousQuery = sessionStorage.getItem('search_query_before_auth');
+            if (previousQuery) {
+                searchInput.value = previousQuery;
+                searchForm.dispatchEvent(new Event('submit')); // Trigger search
+                sessionStorage.removeItem('search_query_before_auth');
+            }
+        } else {
+            handleLogout();
+        }
+      } else {
+        updateAuthUI(null);
+      }
+
+      searchForm.addEventListener('submit', handleSearch);
+
+      searchInput.addEventListener('focus', () => {
+        if (!localStorage.getItem('access_token')) {
+            if(searchInput.value.trim()) {
+                 sessionStorage.setItem('search_query_before_auth', searchInput.value.trim());
+            }
+            redirectToSpotifyAuthorize();
+        }
+      });
+    }
+
+    main().catch(console.error);
+
+  </script>
+</body>
+</html>

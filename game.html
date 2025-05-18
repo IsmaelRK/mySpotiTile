@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Piano Tiles Spotify</title>
+    <link rel="stylesheet" href="static/game.css" />
+    <link rel="icon" href="static/Primary_Logo_Green_CMYK.svg" type="image/x-icon">
+    <script src="https://sdk.scdn.co/spotify-player.js"></script>
+
+</head>
+<body>
+
+
+    <img height="80px" style="margin-bottom: 20px" src="static/Full_Logo_Green_RGB.svg" alt="spotify logo">
+
+
+    <div id="game-area">
+      <div class="column col-A"></div>
+      <div class="column col-S"></div>
+      <div class="column col-D"></div>
+      <div class="column col-J"></div>
+      <div class="column col-K"></div>
+      <div class="column col-L"></div>
+    </div>
+    <div id="instructions">Pressione <strong>A S D J K L</strong>. Tiles longos devem ser segurados até mudarem de cor.</div>
+
+<script>
+    const token = localStorage.getItem("access_token");
+    const selectedTrackUri = localStorage.getItem('selected_track_uri');
+    const gameArea = document.getElementById('game-area');
+    const keys = ['A','S','D','J','K','L'];
+
+    const tileSpeed = 2.7;
+    const spawnInterval = 1500; //ms
+    const tileSize = 80; //px
+    const longTileHoldDuration = 1000; // ms
+
+    let tiles = [];
+    let gameRunning = true;
+    let spotifyPlayer;
+    let score = 0;
+    const activeLongTileHolds = {};
+
+    // --- Spotify Playback  ---
+    window.onSpotifyWebPlaybackSDKReady = () => {
+        spotifyPlayer = new Spotify.Player({
+            name: 'PianoTilesPlayer', getOAuthToken: cb => { cb(token); }, volume: 0.5
+        });
+        spotifyPlayer.connect().then(success => {
+            if (success) console.log('Spotify Player conectado!');
+            else console.error('Falha ao conectar Spotify Player');
+        });
+        spotifyPlayer.addListener('ready', ({ device_id }) => {
+            console.log('Spotify Player Ready', device_id);
+            startPlayback(device_id);
+        });
+        spotifyPlayer.addListener('initialization_error', ({ message }) => console.error('Initialization error:', message));
+        spotifyPlayer.addListener('authentication_error', ({ message }) => console.error('Authentication error:', message));
+        spotifyPlayer.addListener('account_error', ({ message }) => alert('You Need a Premium Spotify Account.'));
+        spotifyPlayer.addListener('playback_error', ({ message }) => console.error('Playback error:', message));
+    };
+
+    function startPlayback(deviceId) {
+        if (!selectedTrackUri) {
+            alert("Error: No music selected.");
+            return;
+        }
+        fetch(`https://api.spotify.com/v1/me/player/play?device_id=${deviceId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ uris: [selectedTrackUri] }),
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+        })
+        .then(response => {
+            if (!response.ok) return response.json().then(err => { throw new Error(`Spotify API error: ${response.status} - ${JSON.stringify(err)}`); });
+            console.log("Música iniciada:", selectedTrackUri);
+        })
+        .catch(e => console.error('Erro ao iniciar música:', e));
+    }
+
+    function pausePlayback() {
+        if (spotifyPlayer) spotifyPlayer.pause().catch(e => console.error('Error:', e));
+    }
+
+    class TileBase {
+        constructor(key) {
+            this.key = key;
+            this.x = keys.indexOf(key) * (gameArea.clientWidth / keys.length);
+            this.y = -this.getHeight();
+            this.element = document.createElement('div');
+            this.element.classList.add('tile');
+            this.element.style.width = (gameArea.clientWidth / keys.length) - 4 + 'px';
+            this.element.style.left = this.x + 2 + 'px';
+            this.element.style.top = this.y + 'px';
+            this.element.textContent = key;
+            this.hit = false;
+            this.removed = false;
+            gameArea.appendChild(this.element);
+        }
+
+        update() {
+            this.y += tileSpeed;
+            this.element.style.top = this.y + 'px';
+        }
+
+        isOffScreen() {
+            return this.y > gameArea.clientHeight;
+        }
+
+        isMissed() {
+            return this.y > (gameArea.clientHeight - (this.getHeight() * 0.1));
+        }
+
+        destroy(fromGameLogic = false) {
+            if (this.element.parentElement === gameArea) {
+                gameArea.removeChild(this.element);
+            }
+            if (fromGameLogic) {
+                this.removed = true;
+            }
+        }
+
+        getHeight() {
+            return tileSize;
+        }
+    }
+
+    class Tile extends TileBase {
+        constructor(key) {
+            super(key);
+        }
+    }
+
+    class TimedTile extends TileBase {
+        constructor(key, holdDuration) {
+            super(key);
+            this.holdDuration = holdDuration;
+            this.isBeingHeld = false;
+            this.holdStartTime = 0;
+            this.holdCompleted = false;
+            this.holdCheckInterval = null;
+
+            this.element.classList.add('tile-long');
+            this.element.style.height = this.getHeight() + 'px';
+        }
+
+        getHeight() {
+            return tileSize + (this.holdDuration / 1000) * tileSpeed * 60 * 0.7;
+        }
+
+        startHold() {
+            if (this.hit || this.isBeingHeld || this.holdCompleted) return;
+
+            this.isBeingHeld = true;
+            this.holdStartTime = Date.now();
+            this.element.classList.add('tile-being-held');
+            console.log(`TimedTile ${this.key} HOLD START`);
+
+            this.holdCheckInterval = setInterval(() => {
+                if (!this.isBeingHeld || this.holdCompleted || this.hit) {
+                    clearInterval(this.holdCheckInterval);
+                    this.holdCheckInterval = null;
+                    return;
+                }
+
+                const elapsedHoldTime = Date.now() - this.holdStartTime;
+                if (elapsedHoldTime >= this.holdDuration) {
+                    this.completeHold();
+                    clearInterval(this.holdCheckInterval);
+                    this.holdCheckInterval = null;
+                }
+            }, 50); // 50ms
+        }
+
+
+        completeHold() {
+            if (this.hit || this.holdCompleted) return;
+
+            console.log(`TimedTile ${this.key} HOLD COMPLETED!`);
+            this.holdCompleted = true;
+            this.hit = true;
+            score++;
+            this.element.classList.add('tile-completed');
+
+        }
+
+        releaseHold() {
+            if (!this.isBeingHeld) return { success: false, error: "Not being held" };
+
+            this.isBeingHeld = false;
+            this.element.classList.remove('tile-being-held');
+            clearInterval(this.holdCheckInterval);
+            this.holdCheckInterval = null;
+
+            if (this.holdCompleted) {
+
+                console.log(`TimedTile ${this.key} RELEASED after completion.`);
+                this.destroy(true);
+                return { success: true };
+            } else {
+
+                console.log(`TimedTile ${this.key} RELEASED TOO EARLY.`);
+                this.hit = true;
+
+                return { success: false, error: "Released too early" };
+            }
+        }
+
+
+        isMissed() {
+            if (this.holdCompleted) {
+                return false;
+            }
+
+            if (this.isBeingHeld) {
+                const bottomY = this.y + this.getHeight();
+                return bottomY > (gameArea.clientHeight + tileSize * 0.5);
+            } else {
+                return this.y > (gameArea.clientHeight - (this.getHeight() * 0.1));
+            }
+        }
+
+        destroy(fromGameLogic = false) {
+            clearInterval(this.holdCheckInterval);
+            this.holdCheckInterval = null;
+            super.destroy(fromGameLogic);
+        }
+    }
+
+    function spawnNextTile() {
+        if (!gameRunning) return;
+        const key = keys[Math.floor(Math.random() * keys.length)];
+        let newTile;
+        if (Math.random() < 0.4) {
+            newTile = new TimedTile(key, longTileHoldDuration);
+        } else {
+            newTile = new Tile(key);
+        }
+        tiles.push(newTile);
+    }
+
+    function gameLoop() {
+        if (!gameRunning) return;
+
+        tiles.forEach(tile => {
+            tile.update();
+            if (!tile.hit && tile.isMissed()) {
+
+                if (tile instanceof TimedTile && tile.isBeingHeld && !tile.holdCompleted) {
+
+                    tile.hit = true;
+                    endGame("Você segurou o tile longo demais (saiu da tela sem completar)!");
+                } else if (!(tile instanceof TimedTile && tile.holdCompleted)) {
+
+                    tile.hit = true;
+                    endGame("Você deixou um tile passar!");
+                }
+            }
+        });
+
+        tiles = tiles.filter(tile => !tile.removed && !tile.isOffScreen());
+
+        if (gameRunning) {
+            requestAnimationFrame(gameLoop);
+        }
+    }
+
+    function endGame(message = 'Game Over') {
+        if (!gameRunning) return;
+        gameRunning = false;
+        pausePlayback();
+        for (const key in activeLongTileHolds) {
+            const tile = activeLongTileHolds[key];
+            if (tile && tile.element) {
+                 tile.element.classList.remove('tile-being-held');
+                 if (tile.holdCheckInterval) clearInterval(tile.holdCheckInterval);
+            }
+            activeLongTileHolds[key] = null;
+        }
+        tiles.forEach(tile => {
+            if (tile instanceof TimedTile && tile.holdCheckInterval) {
+                clearInterval(tile.holdCheckInterval);
+            }
+        });
+        setTimeout(() => {
+            alert(message + (score > 0 ? ` Score: ${score}`: ''));
+        }, 100);
+    }
+
+    document.addEventListener('keydown', e => {
+        if (!gameRunning) return;
+        const pressedKey = e.key.toUpperCase();
+        if (!keys.includes(pressedKey)) return;
+
+        const hittableTiles = tiles.filter(t => t.key === pressedKey && !t.hit && !t.removed)
+                                   .sort((a, b) => b.y - a.y);
+
+        if (hittableTiles.length > 0) {
+            const tileToHit = hittableTiles[0];
+            if (tileToHit instanceof TimedTile) {
+                if (activeLongTileHolds[pressedKey] === tileToHit && tileToHit.isBeingHeld) {
+                    return;
+                }
+                tileToHit.startHold();
+                activeLongTileHolds[pressedKey] = tileToHit;
+            } else if (tileToHit instanceof Tile) {
+                tileToHit.hit = true;
+                tileToHit.destroy(true);
+                score++;
+
+
+            }
+        } else {
+            if (!activeLongTileHolds[pressedKey]) {
+                endGame("Você apertou uma tecla inválida!");
+            }
+        }
+    });
+
+    document.addEventListener('keyup', e => {
+        if (!gameRunning) return;
+        const releasedKey = e.key.toUpperCase();
+        if (!keys.includes(releasedKey)) return;
+
+        const longTileBeingHeld = activeLongTileHolds[releasedKey];
+
+        if (longTileBeingHeld && longTileBeingHeld instanceof TimedTile) {
+
+            const result = longTileBeingHeld.releaseHold();
+
+            if (!result.success && !longTileBeingHeld.holdCompleted) {
+
+                endGame(`Erro com tile longo: ${result.error || "Falha ao soltar."}`);
+            }
+            activeLongTileHolds[releasedKey] = null;
+        }
+    });
+
+    if (selectedTrackUri) {
+        setInterval(spawnNextTile, spawnInterval);
+        gameLoop();
+    } else {
+        const instructionsDiv = document.getElementById('instructions');
+        instructionsDiv.innerHTML = "<strong>Erro: Nenhuma música selecionada.</strong> Por favor, volte e selecione uma música.";
+        instructionsDiv.style.color = "red";
+    }
+</script>
+</body>
+</html>

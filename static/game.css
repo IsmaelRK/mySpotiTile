@@ -1,0 +1,178 @@
+:root {
+    --spotify-green: #1DB954;
+    --spotify-black: #121212;
+    --spotify-gray-darker: #181818;
+    --spotify-gray-dark: #282828;
+    --spotify-gray-medium: #535353;
+    --spotify-gray-light: #B3B3B3;
+    --spotify-white: #FFFFFF;
+
+    --font-main: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
+body {
+    margin: 0;
+    font-family: var(--font-main);
+    background-color: var(--spotify-black);
+    color: var(--spotify-gray-light);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+    padding: 20px;
+    box-sizing: border-box;
+}
+
+
+.container {
+          width: 100%;
+          max-width: 400px;
+          margin-left: auto;
+          margin-right: auto;
+          margin-top: 70px;
+            margin-bottom: 40px;
+          padding-bottom: 20px;
+
+
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+        }
+
+h1 {
+    font-size: 2.8em;
+    margin-bottom: 20px;
+    color: var(--spotify-white);
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    text-shadow: 0px 2px 10px rgba(0, 0, 0, 0.5);
+}
+
+#game-area {
+    width: 90vw;
+    max-width: 450px;
+    height: 75vh;
+    max-height: 600px;
+    background-color: var(--spotify-gray-darker);
+    border: 1px solid var(--spotify-gray-dark);
+    border-radius: 8px;
+    display: flex;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.column {
+    flex: 1;
+    position: relative;
+    border-right: 1px solid var(--spotify-gray-dark);
+    box-sizing: border-box;
+}
+
+.column:last-child {
+    border-right: none;
+}
+
+.tile {
+    position: absolute;
+    background-color: var(--spotify-white);
+    color: var(--spotify-black);
+    border: 1px solid var(--spotify-gray-medium);
+    border-radius: 5px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.7em;
+    font-weight: 600;
+    text-transform: uppercase;
+    user-select: none;
+    transition: background-color 0.1s ease-out, color 0.1s ease-out, transform 0.05s ease-out, box-shadow 0.1s ease-out;
+    will-change: transform, top;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.tile:active {
+    transform: translateY(1px) scale(0.98);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+}
+
+.tile-long {
+    background-color: var(--spotify-gray-medium);
+    color: var(--spotify-white);
+    border-color: var(--spotify-gray-dark);
+}
+
+.tile-being-held {
+    background-color: var(--spotify-green);
+    color: var(--spotify-white);
+    border-color: #168a40;
+    box-shadow: 0 0 12px var(--spotify-green), 0 2px 5px rgba(0,0,0,0.3);
+    animation: pulseSpotifyGreen 1.2s infinite alternate;
+}
+
+@keyframes pulseSpotifyGreen {
+    from {
+        box-shadow: 0 0 8px var(--spotify-green), 0 2px 4px rgba(0,0,0,0.2);
+    }
+    to {
+        box-shadow: 0 0 18px var(--spotify-green), 0 3px 7px rgba(0,0,0,0.35);
+    }
+}
+
+
+.tile-completed {
+    background-color: var(--spotify-green);
+    color: var(--spotify-white);
+    border-color: #168a40;
+    opacity: 0.9;
+}
+
+
+#instructions {
+    margin-top: 25px;
+    font-size: 0.95em;
+    text-align: center;
+    max-width: 90vw;
+    line-height: 1.6;
+    color: var(--spotify-gray-light);
+}
+
+#instructions strong {
+    color: var(--spotify-green);
+    font-weight: 600;
+    background-color: rgba(255,255,255,0.05);
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+@media (max-width: 600px) {
+    h1 {
+        font-size: 2.2em;
+    }
+    #game-area {
+        height: 70vh;
+    }
+    .tile {
+        font-size: 1.5em;
+        border-radius: 4px;
+    }
+    #instructions {
+        font-size: 0.85em;
+    }
+}
+
+@media (max-height: 500px) {
+     h1 {
+        font-size: 1.8em;
+        margin-bottom: 10px;
+    }
+    #game-area {
+        max-height: calc(100vh - 110px);
+    }
+     #instructions {
+        margin-top: 15px;
+    }
+}
